@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+
+  <head>
+    <meta charset="UTF-8">
+    <title>Type play</title>
+    
+
+  </head>
+    
+  <body>
+  <!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DESIGN TYPE PLAY — XEROX GEN</title>
+    <style>
+        :root {
+            --color-bg: #ffffff;
+            --color-fg: #000000;
+            --border-style: 1px solid var(--color-fg);
+            --font-main: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        * { 
+            box-sizing: border-box; 
+            margin: 0; 
+            padding: 0; 
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        body {
+            background-color: var(--color-bg);
+            color: var(--color-fg);
+            font-family: var(--font-main);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            letter-spacing: 0.12em;
+        }
+
+        main {
+            flex: 1;
+            display: flex;
+            height: 100vh;
+        }
+
+        .sidebar {
+            width: 320px;
+            border-right: var(--border-style);
+            display: flex;
+            flex-direction: column;
+            padding: 60px 30px 40px 30px; 
+            overflow-y: auto;
+        }
+
+        .sidebar-section { margin-bottom: 35px; }
+
+        .label-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            margin-bottom: 12px;
+        }
+
+        .canvas-container {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+            background-color: #ffffff;
+        }
+
+        canvas {
+            width: 100%;
+            height: 100%;
+            max-width: 650px;
+            max-height: 650px;
+            border: var(--border-style);
+            background-color: white;
+            image-rendering: pixelated;
+        }
+
+        input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            height: 1px;
+            background: var(--color-fg);
+            outline: none;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 8px;
+            height: 8px;
+            background: var(--color-fg);
+            cursor: pointer;
+            border-radius: 0;
+        }
+
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 14px;
+            background: var(--color-bg);
+            border: var(--border-style);
+            color: var(--color-fg);
+            text-transform: uppercase;
+            font-size: 10px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: 0.2s ease;
+            text-align: center;
+            text-decoration: none;
+            margin-bottom: 40px;
+            user-select: none;
+        }
+        .btn:hover { background: var(--color-fg); color: var(--color-bg); }
+
+        .upload-input { display: none; }
+
+        .footer-info {
+            margin-top: auto;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+    </style>
+</head>
+<body>
+
+<main>
+    <div class="sidebar">
+        <label class="btn" for="fileInput">IMPORT Image</label>
+        <input type="file" id="fileInput" class="upload-input" accept="image/*">
+
+        <div class="sidebar-section">
+            <div class="label-row"><span>Contrast</span><span id="val-contrast">10.0</span></div>
+            <input type="range" id="contrast" min="1" max="25" step="0.5" value="10">
+        </div>
+
+        <div class="sidebar-section">
+            <div class="label-row"><span>Grain</span><span id="val-noise">140</span></div>
+            <input type="range" id="noise" min="0" max="255" value="140">
+        </div>
+
+        <div class="sidebar-section">
+            <div class="label-row"><span>Exposure</span><span id="val-threshold">140</span></div>
+            <input type="range" id="threshold" min="0" max="255" value="140">
+        </div>
+
+        <div class="sidebar-section">
+            <div class="label-row"><span>Melt / Bleed</span><span id="val-bleed">1.2</span></div>
+            <input type="range" id="bleed" min="0" max="5" step="0.1" value="1.2">
+        </div>
+
+        <button class="btn" id="saveBtn" style="margin-top: 10px; margin-bottom: 0;">EXPORT_PNG</button>
+
+        <div class="footer-info">
+            © 2026 DESIGN TYPE PLAY
+        </div>
+    </div>
+
+    <div class="canvas-container">
+        <canvas id="canvas"></canvas>
+    </div>
+</main>
+
+<script>
+    const fileInput = document.getElementById('fileInput');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+    let currentSource = null;
+    const BASE_SIZE = 1024; 
+    let needsUpdate = false;
+
+    // 预生成噪点图，避免在滑块移动时重复创建数组
+    const cachedNoise = new Float32Array(BASE_SIZE * BASE_SIZE);
+    for(let i=0; i<cachedNoise.length; i++) cachedNoise[i] = Math.random() - 0.5;
+
+    function applyXeroxEngine(targetCtx, source, width, height, scale) {
+        const contrast = parseFloat(document.getElementById('contrast').value);
+        const noiseAmt = parseInt(document.getElementById('noise').value);
+        const threshold = parseInt(document.getElementById('threshold').value);
+        const bleed = parseFloat(document.getElementById('bleed').value);
+
+        // 核心修正：初始化填充白色，确保 A4 比例下图形外区域不产生黑块
+        targetCtx.fillStyle = "white";
+        targetCtx.fillRect(0, 0, width, height);
+
+        targetCtx.filter = `contrast(${contrast}) grayscale(100%)`;
+        
+        let sx, sy, sw, sh;
+        if (source.width > source.height) {
+            sh = source.height; sw = sh; sx = (source.width - sh) / 2; sy = 0;
+        } else {
+            sw = source.width; sh = sw; sx = 0; sy = (source.height - sw) / 2;
+        }
+
+        const drawSize = BASE_SIZE * scale;
+        const dx = (width - drawSize) / 2;
+        const dy = (height - drawSize) / 2;
+
+        targetCtx.drawImage(source, sx, sy, sw, sh, dx, dy, drawSize, drawSize);
+        targetCtx.filter = 'none'; 
+        
+        let imageData = targetCtx.getImageData(0, 0, width, height);
+        let data = imageData.data;
+
+        // 步骤2：处理噪点与阈值
+        for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+                const i = (y * width + x) * 4;
+                const nx = Math.floor((x - dx) / scale);
+                const ny = Math.floor((y - dy) / scale);
+                
+                let b = (data[i] + data[i+1] + data[i+2]) / 3;
+                
+                if (nx >= 0 && nx < BASE_SIZE && ny >= 0 && ny < BASE_SIZE) {
+                    b += cachedNoise[ny * BASE_SIZE + nx] * noiseAmt;
+                }
+                
+                let val = b > threshold ? 255 : 0;
+                data[i] = data[i+1] = data[i+2] = val;
+            }
+        }
+        targetCtx.putImageData(imageData, 0, 0);
+
+        // 步骤3：Melt/Bleed
+        if (bleed > 0) {
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = width;
+            tempCanvas.height = height;
+            const tempCtx = tempCanvas.getContext('2d');
+            const scaledBleed = bleed * scale;
+            tempCtx.filter = `blur(${scaledBleed}px) contrast(600%)`;
+            tempCtx.drawImage(targetCtx.canvas, 0, 0);
+            
+            let d = tempCtx.getImageData(0, 0, width, height);
+            for (let i = 0; i < d.data.length; i += 4) {
+                let v = d.data[i] > 128 ? 255 : 0;
+                d.data[i] = d.data[i+1] = d.data[i+2] = v;
+                d.data[i+3] = 255;
+            }
+            targetCtx.putImageData(d, 0, 0);
+        }
+
+        // 核心修正：图形透明底处理，确保上下没有黑块
+        let finalData = targetCtx.getImageData(0, 0, width, height);
+        for (let i = 0; i < finalData.data.length; i += 4) {
+            if (finalData.data[i] > 128) { 
+                finalData.data[i+3] = 0; // 白色变透明
+            } else {
+                finalData.data[i+3] = 255; // 黑色完全不透明
+            }
+        }
+        targetCtx.putImageData(finalData, 0, 0);
+    }
+
+    // 使用 requestAnimationFrame 保证丝滑
+    function requestUpdate() {
+        if (!needsUpdate) {
+            needsUpdate = true;
+            requestAnimationFrame(() => {
+                processImage();
+                needsUpdate = false;
+            });
+        }
+    }
+
+    function processImage() {
+        if (!currentSource) return;
+        canvas.width = BASE_SIZE;
+        canvas.height = BASE_SIZE;
+        applyXeroxEngine(ctx, currentSource, BASE_SIZE, BASE_SIZE, 1);
+    }
+
+    const controls = ['contrast', 'noise', 'threshold', 'bleed'];
+    controls.forEach(id => {
+        document.getElementById(id).addEventListener('input', (e) => {
+            document.getElementById(`val-${id}`).innerText = parseFloat(e.target.value).toFixed(1);
+            requestUpdate(); // 改为请求更新
+        });
+    });
+
+    fileInput.addEventListener('change', e => {
+        const file = e.target.files[0];
+        if (file) {
+            const img = new Image();
+            img.onload = () => { currentSource = img; processImage(); };
+            img.src = URL.createObjectURL(file);
+        }
+    });
+
+    function createTeaMountain() {
+        const tCanvas = document.createElement('canvas');
+        tCanvas.width = 1200; tCanvas.height = 1200;
+        const tCtx = tCanvas.getContext('2d');
+        tCtx.fillStyle = "white"; tCtx.fillRect(0, 0, 1200, 1200);
+        for (let l = 0; l < 5; l++) {
+            const yBase = 300 + l * 180;
+            const hillHeight = 250;
+            tCtx.beginPath(); tCtx.moveTo(-100, 1200);
+            for (let x = 0; x <= 1300; x += 50) {
+                const y = yBase - Math.sin(x * 0.003 + l) * hillHeight;
+                tCtx.lineTo(x, y);
+            }
+            tCtx.lineTo(1300, 1200); tCtx.closePath();
+            const grad = tCtx.createLinearGradient(0, yBase - hillHeight, 0, yBase + 200);
+            grad.addColorStop(0, `rgb(${40+l*20}, ${40+l*20}, ${40+l*20})`);
+            grad.addColorStop(1, "white");
+            tCtx.fillStyle = grad; tCtx.fill();
+            tCtx.strokeStyle = "black"; tCtx.lineWidth = 1.5;
+            for (let j = 0; j < 12; j++) {
+                tCtx.beginPath(); const offset = j * 15;
+                for (let x = -50; x <= 1250; x += 20) {
+                    const y = yBase - Math.sin(x * 0.003 + l) * hillHeight + offset;
+                    if (x === -50) tCtx.moveTo(x, y); else tCtx.lineTo(x, y);
+                }
+                tCtx.stroke();
+            }
+        }
+        const sunGrad = tCtx.createRadialGradient(900, 250, 20, 900, 250, 150);
+        sunGrad.addColorStop(0, "black"); sunGrad.addColorStop(1, "white");
+        tCtx.fillStyle = sunGrad; tCtx.beginPath(); tCtx.arc(900, 250, 120, 0, Math.PI * 2); tCtx.fill();
+        return tCanvas;
+    }
+
+    window.onload = () => {
+        currentSource = createTeaMountain();
+        processImage();
+    };
+
+    document.getElementById('saveBtn').addEventListener('click', () => {
+        if (!currentSource) return;
+        const exportW = 2480; 
+        const exportH = 3508;
+        const scale = exportW / BASE_SIZE;
+        const offCanvas = document.createElement('canvas');
+        const offCtx = offCanvas.getContext('2d', { willReadFrequently: true });
+        offCanvas.width = exportW;
+        offCanvas.height = exportH;
+        applyXeroxEngine(offCtx, currentSource, exportW, exportH, scale);
+        const link = document.createElement('a');
+        link.download = `XEROX_PRINT_${Date.now()}.png`;
+        link.href = offCanvas.toDataURL('image/png');
+        link.click();
+    });
+
+    window.addEventListener('paste', e => {
+        const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+        for (let item of items) {
+            if (item.type.indexOf('image') !== -1) {
+                const img = new Image();
+                img.onload = () => { currentSource = img; processImage(); };
+                img.src = URL.createObjectURL(item.getAsFile());
+            }
+        }
+    });
+</script>
+
+</body>
+</html>
+    
+  </body>
+  
+</html>
